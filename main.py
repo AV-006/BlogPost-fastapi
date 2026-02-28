@@ -31,7 +31,7 @@ class Blogs(Base):
     title=Column(String, nullable=False)
     content=Column(Text, nullable=False)
     user_id=Column(Integer, ForeignKey("users.id") )
-    blog=relationship("User", back_populates="creator")
+    author=relationship("User", back_populates="blogs")
 
 
 class User(Base):
@@ -40,7 +40,7 @@ class User(Base):
     name=Column(String, nullable=False)
     age=Column(Integer, nullable=False)
     email=Column(String, nullable=False)
-    creator=relationship("Blogs",back_populates="blog")
+    blogs=relationship("Blogs",back_populates="author")
 
 #create the tables
 Base.metadata.create_all(bind=engine)
@@ -50,7 +50,7 @@ Base.metadata.create_all(bind=engine)
 
 class BlogCreate(BaseModel):
     title: str
-    body: str
+    content: str
 
 class UsersCreate(BaseModel):
     name: str
@@ -72,8 +72,8 @@ class ShowUsers(BaseModel):
 class ShowBlogs(BaseModel):
     id: int
     title: str
-    body: str
-    author: ShowUsers
+    content: str
+    # author: ShowUsers
     class Config:
         orm_mode=True
 
@@ -81,7 +81,7 @@ class ShowBlogs(BaseModel):
 app=FastAPI()
 
 
-
+#user routes
 @app.get('/')
 def home_route():
     return {"message": "home"}
@@ -106,3 +106,48 @@ def create_user(user:UsersCreate,session:Session=Depends(create_session)):
     session.commit()
     session.refresh(new_user)
     return {"message: user created"}
+
+
+#blog routes
+@app.post('/blogs/{user_id}')
+def create_blog(blog: BlogCreate, user_id:int, session: Session=Depends(create_session)):
+    new_blog=Blogs(
+        title=blog.title,
+        content=blog.content,
+        user_id=user_id
+    )
+    session.add(new_blog)
+    session.commit()
+    session.refresh(new_blog)
+    return {"message":"blog created"}
+
+
+@app.get('/blogs',response_model=List[ShowUsers])
+def get_all_blogs(session: Session=Depends(create_session)):
+    blogs=session.query(User).all()
+    return blogs
+
+
+@app.get('/blogs/{user_id}',response_model=List[ShowUsers])
+def get_user_blogs(user_id: int,session:Session=Depends(create_session)):
+    blogs=session.query(User).filter(User.id==user_id).all()
+    return blogs
+
+@app.delete('/blogs/{blog_id}')
+def delete_blog(blog_id: int, session: Session=Depends(create_session)):
+    blog=session.query(Blogs).filter(Blogs.id==blog_id).first()
+    if not blog:
+        raise HTTPException(status_code=404,detail="blog not found")
+    session.delete(blog)
+    session.commit()
+    return {"message": "blog deleted"}
+
+@app.put('/blogs/{blog_id}')
+def update_blog(blog:BlogCreate,blog_id: int, session:Session=Depends(create_session)):
+    current_blog=session.query(Blogs).filter(Blogs.id==blog_id).first()
+    for key,value in blog.dict().items():
+        setattr(current_blog,key,value)
+    
+    session.commit()
+    session.refresh(current_blog)
+    return {"message": "blog updated"}
