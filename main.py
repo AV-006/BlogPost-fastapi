@@ -1,9 +1,19 @@
 from fastapi import FastAPI,Depends,HTTPException
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+import jwt
+from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column,Integer,String,Text,ForeignKey     
 from sqlalchemy.orm import declarative_base,sessionmaker,Session,relationship 
 from typing import List
-from passlib import PasswordHash
+from pwdlib import PasswordHash
+
+SECRET_KEY = "fc0635a84612594ef01c4f0fb1406dac364a89b69d07ff8536f6906b0c4d5808"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+password_hash=PasswordHash.recommended()
+DUMMY_HASH = password_hash.hash("dummypassword")
 
 url="postgresql://postgres:password@localhost:5432/fastapi_db"
 
@@ -41,6 +51,7 @@ class User(Base):
     name=Column(String, nullable=False)
     age=Column(Integer, nullable=False)
     email=Column(String, nullable=False)
+    password=Column(String, nullable=False)
     blogs=relationship("Blogs",back_populates="author")
 
 #create the tables
@@ -87,21 +98,23 @@ app=FastAPI()
 def home_route():
     return {"message": "home"}
 
-@app.get('/users/{user_id}', response_model=ShowUsers)
+@app.get('/users/{user_id}', response_model=ShowUsers,tags=["users"])
 def get_user(user_id:int,session:Session = Depends(create_session)):
     user=session.query(User).filter(User.id==user_id).first()
     if not user:
         raise HTTPException(status_code=404,detail="User does not exist")
     return user
 
-@app.post('/users')
+@app.post('/users',tags=["users"])
 def create_user(user:UsersCreate,session:Session=Depends(create_session)):
     if (session.query(User).filter(User.email==user.email).first()):
         raise HTTPException(status_code=400,detail="User already exists")
+    hashed_password=password_hash.hash(user.password)
     new_user=User(
         name=user.name,
         age=user.age,
-        email=user.email
+        email=user.email,
+        password=hashed_password
     )
     session.add(new_user)
     session.commit()
@@ -110,7 +123,7 @@ def create_user(user:UsersCreate,session:Session=Depends(create_session)):
 
 
 #blog routes
-@app.post('/blogs/{user_id}')
+@app.post('/blogs/{user_id}',tags=["blogs"])
 def create_blog(blog: BlogCreate, user_id:int, session: Session=Depends(create_session)):
     new_blog=Blogs(
         title=blog.title,
@@ -123,18 +136,18 @@ def create_blog(blog: BlogCreate, user_id:int, session: Session=Depends(create_s
     return {"message":"blog created"}
 
 
-@app.get('/blogs',response_model=List[ShowUsers])
+@app.get('/blogs',response_model=List[ShowUsers],tags=["blogs"])
 def get_all_blogs(session: Session=Depends(create_session)):
     blogs=session.query(User).all()
     return blogs
 
 
-@app.get('/blogs/{user_id}',response_model=List[ShowUsers])
+@app.get('/blogs/{user_id}',response_model=List[ShowUsers],tags=["blogs"])
 def get_user_blogs(user_id: int,session:Session=Depends(create_session)):
     blogs=session.query(User).filter(User.id==user_id).all()
     return blogs
 
-@app.delete('/blogs/{blog_id}')
+@app.delete('/blogs/{blog_id}',tags=["blogs"])
 def delete_blog(blog_id: int, session: Session=Depends(create_session)):
     blog=session.query(Blogs).filter(Blogs.id==blog_id).first()
     if not blog:
@@ -143,7 +156,7 @@ def delete_blog(blog_id: int, session: Session=Depends(create_session)):
     session.commit()
     return {"message": "blog deleted"}
 
-@app.put('/blogs/{blog_id}')
+@app.put('/blogs/{blog_id}',tags=["blogs"])
 def update_blog(blog:BlogCreate,blog_id: int, session:Session=Depends(create_session)):
     current_blog=session.query(Blogs).filter(Blogs.id==blog_id).first()
     for key,value in blog.dict().items():
