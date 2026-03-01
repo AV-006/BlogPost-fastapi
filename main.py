@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, Column,Integer,String,Text,ForeignKey     
 from sqlalchemy.orm import declarative_base,sessionmaker,Session,relationship 
 from typing import List
+from passlib import PasswordHash
 
 url="postgresql://postgres:password@localhost:5432/fastapi_db"
 
