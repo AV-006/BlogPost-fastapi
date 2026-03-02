@@ -1,3 +1,5 @@
+from datetime import timedelta, datetime,  timezone
+
 from fastapi import FastAPI,Depends,HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import jwt
@@ -14,6 +16,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 password_hash=PasswordHash.recommended()
 DUMMY_HASH = password_hash.hash("dummypassword")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 url="postgresql://postgres:password@localhost:5432/fastapi_db"
 
@@ -70,6 +73,10 @@ class UsersCreate(BaseModel):
     email: str
     password: str
 
+class UsersLogin(BaseModel):
+    email:str
+    password: str
+
 #response body
 class ShowUsers(BaseModel):
     id: int
@@ -89,8 +96,59 @@ class ShowBlogs(BaseModel):
     class Config:
         orm_mode=True
 
+class Token(BaseModel):
+    access_token:str
+    token_type:str
+
+class TokenData(BaseModel):
+    email: str | None=None
+
+# create jwt access token
+def create_access_token(data:dict, expires_delta: timedelta|None=None):
+    to_encode=data.copy()
+    if expires_delta:
+        expire=datetime.now(timezone.utc)+expires_delta
+    else:
+        expire=datetime.now(timezone.utc)+timedelta(minutes=15)
+    to_encode.update({"exp":expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 app=FastAPI()
+
+#login route
+@app.post('/login')
+def login_user(credential: UsersLogin, session: Session =Depends(create_session)):
+    user=session.query(User).filter(credential.email==User.email).first()
+    if not user:
+        password_hash.verify(credential.password,DUMMY_HASH)
+        return {"message": "Invalid login credentials"}
+    if not password_hash.verify(credential.password,user.password):
+        return {"message": "Invalid login credentials"}
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return Token(access_token=access_token, token_type="bearer")
+
+def verify_token(token:str,credentials_exception):
+    try:
+        payload=jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email=payload.get("sub")
+        if not email:
+            raise credentials_exception
+        token_data=TokenData(email)
+    except:
+        raise credentials_exception
+
+def get_current_user(token: str=Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=404,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    return verify_token(token,credentials_exception)
+
 
 
 #user routes
@@ -99,7 +157,7 @@ def home_route():
     return {"message": "home"}
 
 @app.get('/users/{user_id}', response_model=ShowUsers,tags=["users"])
-def get_user(user_id:int,session:Session = Depends(create_session)):
+def get_user(user_id:int,session:Session = Depends(create_session),get_current_user: ShowUsers =Depends(get_current_user)):
     user=session.query(User).filter(User.id==user_id).first()
     if not user:
         raise HTTPException(status_code=404,detail="User does not exist")
