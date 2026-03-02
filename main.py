@@ -118,12 +118,12 @@ app=FastAPI()
 
 #login route
 @app.post('/login')
-def login_user(credential: UsersLogin, session: Session =Depends(create_session)):
-    user=session.query(User).filter(credential.email==User.email).first()
+def login_user(session: Session =Depends(create_session), form_data: OAuth2PasswordRequestForm = Depends()):
+    user=session.query(User).filter(form_data.username==User.email).first()
     if not user:
-        password_hash.verify(credential.password,DUMMY_HASH)
-        return {"message": "Invalid login credentials"}
-    if not password_hash.verify(credential.password,user.password):
+        password_hash.verify(form_data.password,DUMMY_HASH)
+        return {"message": "Invalid login credentials"} 
+    if not password_hash.verify(form_data.password,user.password):
         return {"message": "Invalid login credentials"}
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -137,17 +137,23 @@ def verify_token(token:str,credentials_exception):
         email=payload.get("sub")
         if not email:
             raise credentials_exception
-        token_data=TokenData(email)
-    except:
+        return email
+    except InvalidTokenError:
         raise credentials_exception
 
-def get_current_user(token: str=Depends(oauth2_scheme)):
+def get_current_user(token: str=Depends(oauth2_scheme), session: Session=Depends(create_session)):
     credentials_exception = HTTPException(
         status_code=404,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    return verify_token(token,credentials_exception)
+    email= verify_token(token,credentials_exception)
+    user = session.query(User).filter(User.email == email).first()
+
+    if user is None:
+        raise credentials_exception
+
+    return user
 
 
 
@@ -157,7 +163,7 @@ def home_route():
     return {"message": "home"}
 
 @app.get('/users/{user_id}', response_model=ShowUsers,tags=["users"])
-def get_user(user_id:int,session:Session = Depends(create_session),get_current_user: ShowUsers =Depends(get_current_user)):
+def get_user(user_id:int,session:Session = Depends(create_session),get_current_user: User =Depends(get_current_user)):
     user=session.query(User).filter(User.id==user_id).first()
     if not user:
         raise HTTPException(status_code=404,detail="User does not exist")
@@ -182,7 +188,7 @@ def create_user(user:UsersCreate,session:Session=Depends(create_session)):
 
 #blog routes
 @app.post('/blogs/{user_id}',tags=["blogs"])
-def create_blog(blog: BlogCreate, user_id:int, session: Session=Depends(create_session)):
+def create_blog(blog: BlogCreate, user_id:int, session: Session=Depends(create_session),get_current_user: User =Depends(get_current_user)):
     new_blog=Blogs(
         title=blog.title,
         content=blog.content,
@@ -195,18 +201,18 @@ def create_blog(blog: BlogCreate, user_id:int, session: Session=Depends(create_s
 
 
 @app.get('/blogs',response_model=List[ShowUsers],tags=["blogs"])
-def get_all_blogs(session: Session=Depends(create_session)):
+def get_all_blogs(session: Session=Depends(create_session),get_current_user: User =Depends(get_current_user)):
     blogs=session.query(User).all()
     return blogs
 
 
 @app.get('/blogs/{user_id}',response_model=List[ShowUsers],tags=["blogs"])
-def get_user_blogs(user_id: int,session:Session=Depends(create_session)):
+def get_user_blogs(user_id: int,session:Session=Depends(create_session),get_current_user: User =Depends(get_current_user)):
     blogs=session.query(User).filter(User.id==user_id).all()
     return blogs
 
 @app.delete('/blogs/{blog_id}',tags=["blogs"])
-def delete_blog(blog_id: int, session: Session=Depends(create_session)):
+def delete_blog(blog_id: int, session: Session=Depends(create_session),get_current_user: User =Depends(get_current_user)):
     blog=session.query(Blogs).filter(Blogs.id==blog_id).first()
     if not blog:
         raise HTTPException(status_code=404,detail="blog not found")
@@ -215,7 +221,7 @@ def delete_blog(blog_id: int, session: Session=Depends(create_session)):
     return {"message": "blog deleted"}
 
 @app.put('/blogs/{blog_id}',tags=["blogs"])
-def update_blog(blog:BlogCreate,blog_id: int, session:Session=Depends(create_session)):
+def update_blog(blog:BlogCreate,blog_id: int, session:Session=Depends(create_session),get_current_user: User =Depends(get_current_user)):
     current_blog=session.query(Blogs).filter(Blogs.id==blog_id).first()
     for key,value in blog.dict().items():
         setattr(current_blog,key,value)
