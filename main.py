@@ -1,5 +1,5 @@
 from datetime import timedelta, datetime,  timezone
-
+import os
 from fastapi import FastAPI,Depends,HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import jwt
@@ -10,17 +10,21 @@ from sqlalchemy.orm import declarative_base,sessionmaker,Session,relationship
 from typing import List
 from pwdlib import PasswordHash
 
-SECRET_KEY = "fc0635a84612594ef01c4f0fb1406dac364a89b69d07ff8536f6906b0c4d5808"
+from dotenv import load_dotenv
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+SECRET_KEY = os.getenv("SECRET_KEY")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
 
 password_hash=PasswordHash.recommended()
 DUMMY_HASH = password_hash.hash("dummypassword")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-url="postgresql://postgres:password@localhost:5432/fastapi_db"
 
-engine=create_engine(url,echo=True)
+engine=create_engine(DATABASE_URL,echo=True)
 
 #now create a session
 
@@ -189,6 +193,8 @@ def create_user(user:UsersCreate,session:Session=Depends(create_session)):
 #blog routes
 @app.post('/blogs/{user_id}',tags=["blogs"])
 def create_blog(blog: BlogCreate, user_id:int, session: Session=Depends(create_session),get_current_user: User =Depends(get_current_user)):
+    if (user_id!=get_current_user.id):
+        raise HTTPException(status_code=404,detail="Not authenticated")
     new_blog=Blogs(
         title=blog.title,
         content=blog.content,
@@ -216,6 +222,8 @@ def delete_blog(blog_id: int, session: Session=Depends(create_session),get_curre
     blog=session.query(Blogs).filter(Blogs.id==blog_id).first()
     if not blog:
         raise HTTPException(status_code=404,detail="blog not found")
+    if (blog.user_id!=get_current_user.id):
+        raise HTTPException(status_code=404,detail="Not authenticated")
     session.delete(blog)
     session.commit()
     return {"message": "blog deleted"}
